@@ -1,242 +1,842 @@
 <!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8"><title>To-Do Overload</title>
-<style>
-html,body{margin:0;height:100%;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center}
-canvas{height:100vh;max-width:100vw;aspect-ratio:9/16;background:#000}
-#ui{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;font:14px sans-serif;color:#fff;background:#000a;padding:8px 14px;border:1px solid #fff}
-#ui button{background:#ff6a00;border:2px solid #fff;color:#000;font-weight:700;padding:6px 16px;cursor:pointer}
-#ui input{width:260px;accent-color:#ff6a00}
-</style></head><body>
-<canvas id="c" width="720" height="1280"></canvas>
-<div id="ui"><button id="pb">Play</button><input id="sl" type="range" min="0" max="20" step="0.01" value="0"><span id="tl">0.00s</span></div>
-<script>
-const W=720,H=1280,CX=360,CY=640,DUR=20,N=170,STEP=12,TB=14;
-const cv=document.getElementById('c'),g=cv.getContext('2d');
-const cl=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
-const sm=(a,b,x)=>{x=cl((x-a)/(b-a));return x*x*(3-2*x)};
-const lr=(a,b,k)=>a+(b-a)*k;
-const R=(i,k)=>{const x=Math.sin(i*127.1+k*311.7)*43758.5453;return x-Math.floor(x)};
-const mixA=(a,b,k)=>[lr(a[0],b[0],k),lr(a[1],b[1],k),lr(a[2],b[2],k)];
-const rgb=a=>`rgb(${a[0]|0},${a[1]|0},${a[2]|0})`;
-const DARK=[12,12,14],ORG=[255,106,0],RED=[235,20,30];
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1,
+                 user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0c">
+  <meta name="description"
+        content="Архитектура внимания — пять шагов к ясности мышления.">
+  <title>Архитектура внимания</title>
 
-// ---- карточки (детерминированные параметры) ----
-const cards=[];
-for(let i=0;i<N;i++){const f=i/N;
- cards.push({i,ts:13.2*Math.pow(f,.85),a:i*1.13,y:i*STEP,r:240-110*f+R(i,1)*50,
- tw:(R(i,2)-.5)*1.2,rl:(R(i,3)-.5)*.9,w:120+R(i,4)*40,h:78+R(i,5)*20,gl:.4+.6*R(i,6)});}
+  <!-- Официальный Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-// ---- камера ----
-function camState(t){
- const tc=Math.min(t,TB),p=tc/DUR;
- const cnt=Math.min(N,N*Math.pow(tc/13.2,1/.85)),top=cnt*STEP;
- const yaw=.3*tc+.012*tc*tc+(t>TB?.15*(t-TB):0);
- const pitch=.28+.08*Math.sin(tc*.5);
- const sh=sm(.4,.7,p)*6,k=(t*30|0);
- return{yaw:yaw,cy:Math.cos(yaw),sy:Math.sin(yaw),cp:Math.cos(pitch),sp:Math.sin(pitch),
-  D:lr(1700,620,sm(0,.7,p)),camY:Math.max(160,top*.55)+(R(k,1)-.5)*sh*(t<TB?1:0)};
-}
-function P(C,x,y,z){
- y-=C.camY;
- const X=x*C.cy+z*C.sy;let Z=-x*C.sy+z*C.cy;
- const Y=y*C.cp-Z*C.sp;Z=y*C.sp+Z*C.cp+C.D;
- if(Z<60)return null;
- const s=900/Z;return[CX+X*s,CY-Y*s,s,Z];
-}
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0c;
+      --surface: #111114;
+      --surface-hover: #17171b;
+      --text: #f5f3ef;
+      --muted: #8b8993;
+      --gold: #ffc400;
+      --purple: #b04dff;
+      --border: rgba(255, 255, 255, .09);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
 
-// ---- карточка в 3D ----
-function quad(c,t,C,al){
- const tt=t-c.ts;if(tt<0)return null;
- const f=Math.min(tt/.7,1),e=1-Math.pow(1-f,3);
- const am=sm(.4,.7,Math.min(t,TB)/DUR)*16,k=(t*30|0);
- const a=c.a+(1-e)*1.5,ang=a+c.tw;
- const cx=Math.cos(a)*c.r+(R(c.i,k)-.5)*am,cz=Math.sin(a)*c.r+(R(c.i,k+5)-.5)*am;
- const cy=c.y+Math.sin(t*1.3+c.i)*6+(1-e)*900+(R(c.i,k+9)-.5)*am;
- const tx=-Math.sin(ang),tz=Math.cos(ang),rl=c.rl+(1-e)*3,cr=Math.cos(rl),sr=Math.sin(rl);
- const p=[];
- for(const [su,sv] of [[-1,1],[1,1],[1,-1],[-1,-1]]){
-  const du=su*c.w/2,dv=sv*c.h/2;
-  const q=P(C,cx+du*tx*cr-dv*tx*sr,cy+du*sr+dv*cr,cz+du*tz*cr-dv*tz*sr);
-  if(!q)return null;p.push(q);
- }
- return{c,p,al:al*cl(f*3),z:(p[0][3]+p[2][3])/2,s:(p[0][2]+p[2][2])/2};
-}
-function drawCard(q,pc){
- const c=q.c,p=q.p,s=q.s;
- const B=(u,v)=>[(p[0][0]*(1-u)+p[1][0]*u)*(1-v)+(p[3][0]*(1-u)+p[2][0]*u)*v,
-                 (p[0][1]*(1-u)+p[1][1]*u)*(1-v)+(p[3][1]*(1-u)+p[2][1]*u)*v];
- const gl=c.gl*(.12+.88*sm(.05,.4,pc));
- let col=mixA(DARK,ORG,gl);
- col=mixA(col,RED,sm(.4,.7,pc)*c.gl*.8);
- g.globalAlpha=q.al;
- g.beginPath();g.moveTo(p[0][0],p[0][1]);for(let i=1;i<4;i++)g.lineTo(p[i][0],p[i][1]);g.closePath();
- g.shadowColor=gl>.45?(pc>.45?'#ff1020':'#ff6a00'):'transparent';g.shadowBlur=gl*34;
- g.fillStyle=rgb(col);g.fill();g.shadowBlur=0;
- g.lineJoin='miter';g.strokeStyle='#000';g.lineWidth=Math.max(3,8*s);g.stroke();
- g.strokeStyle='#fff';g.lineWidth=Math.max(1.2,3*s);g.stroke();
- if(s<.18){g.globalAlpha=1;return;}
- const ink=gl>.5?'#1a0600':'#fff';
- g.strokeStyle=ink;g.lineWidth=Math.max(1,2.4*s);
- // чекбокс (пустой — задача не сделана) и строки задач
- g.beginPath();let a=B(.08,.2),b=B(.2,.2),d=B(.2,.42),e=B(.08,.42);
- g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.lineTo(d[0],d[1]);g.lineTo(e[0],e[1]);g.closePath();g.stroke();
- for(let k=0;k<3;k++){const v=.26+k*.22,u2=.3+.55*(.4+.6*R(c.i,60+k));
-  const m1=B(.3,v),m2=B(u2,v);g.beginPath();g.moveTo(m1[0],m1[1]);g.lineTo(m2[0],m2[1]);g.stroke();}
- // манга-штриховка в углу
- g.strokeStyle=gl>.5?'#000':'#aaa';g.lineWidth=Math.max(1,1.6*s);g.beginPath();
- for(let k=0;k<4;k++){const u=.56+.1*k,m1=B(u,1),m2=B(1,u);g.moveTo(m1[0],m1[1]);g.lineTo(m2[0],m2[1]);}
- g.stroke();
- // halftone-тень
- g.fillStyle=gl>.5?'#6a1500':'#fff';g.beginPath();
- for(let i=0;i<4;i++)for(let j=0;j<5;j++){const m=B(.64+.08*i,.1+.17*j),r=(.6+i*.5)*s*1.6;
-  g.moveTo(m[0]+r,m[1]);g.arc(m[0],m[1],r,0,6.283);}
- g.fill();g.globalAlpha=1;
-}
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
 
-// ---- фон ----
-function halfBG(inten,t,col){
- if(inten<=.01)return;const sp=24;g.fillStyle=col;g.beginPath();
- for(let y=-12;y<H+12;y+=sp){for(let x=((y/sp|0)%2)*sp/2;x<W+12;x+=sp){
-  const d=Math.hypot(x-CX,(y-CY)*.7)/520,r=sp*.55*Math.pow(cl(1-d),1.3)*inten;
-  if(r>.6){g.moveTo(x+r,y);g.arc(x,y,r,0,6.283);}}}
- g.fill();
-}
-function noise(t,n){
- const k=(t*20|0);
- for(let i=0;i<n;i++){const x=R(i,k)*W|0,y=R(i,k+3)*H|0,s=2+(R(i,k+7)*3|0);
-  g.fillStyle=R(i,k+9)<.5?'rgba(255,255,255,.55)':'rgba(255,106,0,.7)';g.fillRect(x,y,s,s);}
-}
-function redRain(t,int){
- if(int<=.01)return;
- for(let k=0;k<70;k++){
-  const sp=500+R(k,2)*1100,len=100+R(k,3)*400,y=((t*sp+R(k,4)*2000)%(H+len*2))-len,x=R(k,1)*W;
-  g.strokeStyle=`rgba(255,${R(k,5)<.3?60:20},30,${(.5+.5*R(k,6))*int})`;g.lineWidth=1+R(k,7)*3;
-  g.beginPath();g.moveTo(x,y);g.lineTo(x,y+len);g.stroke();}
- const kk=(t*10|0);
- for(let b=0;b<6;b++){const y=R(b,kk)*H,h=6+R(b,kk+2)*40,x=(R(b,kk+4)-.5)*80;
-  g.fillStyle=`rgba(235,20,30,${.35*int})`;g.fillRect(x,y,W,h);
-  g.fillStyle=`rgba(255,255,255,${.5*int})`;g.fillRect(x,y,W,2);}
-}
-function speedLines(t,int){
- if(int<=.01)return;const k=(t*24|0);g.fillStyle=`rgba(255,255,255,${int})`;
- for(let i=0;i<70;i++){const an=R(i,k)*6.283,r0=140+R(i,k+1)*260,r1=900,w=.012+R(i,k+2)*.02;
-  g.beginPath();g.moveTo(CX+Math.cos(an-w)*r1,CY+Math.sin(an-w)*r1);
-  g.lineTo(CX+Math.cos(an+w)*r1,CY+Math.sin(an+w)*r1);
-  g.lineTo(CX+Math.cos(an)*r0,CY+Math.sin(an)*r0);g.closePath();g.fill();}
-}
+    html {
+      background: var(--bg);
+      scroll-behavior: smooth;
+    }
 
-// ---- цифровая пыль ----
-function dust(t,C){
- const tt=t-TB;
- for(const c of cards){
-  const cx0=Math.cos(c.a)*c.r,cz0=Math.sin(c.a)*c.r,cy0=c.y+Math.sin(TB*1.3+c.i)*6;
-  const ang=c.a+c.tw,tx=-Math.sin(ang),tz=Math.cos(ang);
-  for(let k=0;k<8;k++){
-   const life=2.2+R(c.i,k+40)*1.8;if(tt>life)continue;
-   const rr=.5+R(c.i,k+30),sp=140+R(c.i,k+34)*520,d=(1-Math.exp(-tt*1.2))/1.2*sp,off=(R(c.i,k+20)-.5)*c.w;
-   const x=cx0+tx*off+(Math.cos(c.a)*rr+(R(c.i,k+31)-.5))*d;
-   const y=cy0+(R(c.i,k+10)-.5)*c.h+(R(c.i,k+32)-.2)*.9*d-60*tt*tt;
-   const z=cz0+tz*off+(Math.sin(c.a)*rr+(R(c.i,k+33)-.5))*d;
-   const q=P(C,x,y,z);if(!q)continue;
-   const sz=(2+R(c.i,k+50)*5)*q[2]*(1-tt/life*.5),r=R(c.i,k+51);
-   g.globalAlpha=(1-tt/life)*(.6+.4*Math.sin(t*40+c.i+k));
-   g.fillStyle=r<.4?'#fff':r<.85?'#ff6a00':'#eb141e';
-   g.fillRect(q[0]-sz/2,q[1]-sz/2,sz,sz);}
- }
- g.globalAlpha=1;
-}
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      background:
+        radial-gradient(
+          ellipse at 85% 8%,
+          rgba(176, 77, 255, .09),
+          transparent 35%
+        ),
+        radial-gradient(
+          ellipse at 0% 42%,
+          rgba(255, 196, 0, .035),
+          transparent 32%
+        ),
+        var(--bg);
+      color: var(--text);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
 
-// ---- финальная карточка ----
-function finalCard(t){
- const k=cl((t-14.35)/.8);if(k<=0)return;
- const e=1+2.70158*Math.pow(k-1,3)+1.70158*Math.pow(k-1,2);
- const rot=Math.sin(t*3)*.05*Math.exp(-(t-14.35)*1.2);
- g.save();g.translate(CX,CY);g.rotate(rot);g.scale(e,e);
- // halftone-тень
- g.fillStyle='#ff6a00';g.beginPath();
- for(let x=-100;x<=100;x+=12)for(let y=-130;y<=130;y+=12){
-  const r=6*cl((x/100+y/130+1)/2.2);if(r>.7){g.moveTo(x+16+r,y+20);g.arc(x+16,y+20,r,0,6.283);}}
- g.fill();
- g.shadowColor='#fff';g.shadowBlur=45*(1-sm(17,17.6,t));
- g.fillStyle='#fff';g.strokeStyle='#000';g.lineWidth=9;g.lineJoin='miter';
- g.fillRect(-100,-130,200,260);g.shadowBlur=0;g.strokeRect(-100,-130,200,260);
- // штриховка в углу
- g.strokeStyle='#bbb';g.lineWidth=2;g.beginPath();
- for(let i=0;i<6;i++){g.moveTo(100-i*12-8,130);g.lineTo(100,130-i*12-8);}g.stroke();
- // галочка
- const q=sm(15.2,16.2,t)*165,pts=[[-48,6],[-12,44],[56,-46]];
- for(const [ox,oy,c,w] of [[6,6,'#ff6a00',18],[0,0,'#000',16]]){
-  g.strokeStyle=c;g.lineWidth=w;g.lineCap='round';g.lineJoin='round';g.beginPath();
-  let rem=q;g.moveTo(pts[0][0]+ox,pts[0][1]+oy);
-  for(let i=1;i<3;i++){const dx=pts[i][0]-pts[i-1][0],dy=pts[i][1]-pts[i-1][1],L=Math.hypot(dx,dy),f=cl(rem/L);
-   if(rem<=0)break;g.lineTo(pts[i-1][0]+dx*f+ox,pts[i-1][1]+dy*f+oy);rem-=L;}
-  g.stroke();}
- g.restore();
-}
+    button {
+      font: inherit;
+    }
 
-// ---- кадр ----
-window.__drawCityFrame=(t)=>{
- t=cl(+t||0,0,DUR);
- const tc=Math.min(t,TB),pc=tc/DUR,C=camState(t);
- let roll=.1*Math.sin(tc*.8)+sm(.4,.7,pc)*.22*Math.sin(tc*1.9);
- if(t>TB)roll*=1-sm(14.5,16.5,t);
- if(t>17)roll+=.1*Math.sin((t-17)*9)*Math.exp(-(t-17)*3);
- let z=1;
- if(t>17){const k=cl((t-17)/1.4);z=1+3.4*Math.pow(k,4);if(t>18.4)z+=.4*(t-18.4)/1.6;}
- g.setTransform(1,0,0,1,0,0);g.globalAlpha=1;g.fillStyle='#000';g.fillRect(0,0,W,H);
- g.save();g.translate(CX,CY);g.rotate(roll);g.scale(z,z);g.translate(-CX,-CY);
+    .app {
+      position: relative;
+      width: 100%;
+      max-width: 600px;
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0 auto;
+      padding: 0 22px calc(38px + var(--safe-bottom));
+    }
 
- // свечение + halftone
- let inten=(sm(0,.4,pc)*.7+.3*sm(.4,.7,pc))*(t>TB?1-sm(TB,16,t):1);
- const hot=sm(.4,.7,pc);
- const rg=g.createRadialGradient(CX,CY,0,CX,CY,700);
- rg.addColorStop(0,`rgba(${lr(255,235,hot)|0},${lr(90,20,hot)|0},${lr(0,30,hot)|0},${.35*inten})`);rg.addColorStop(1,'rgba(0,0,0,0)');
- g.fillStyle=rg;g.fillRect(-400,-600,1500,2500);
- halfBG(inten,t,hot>.5?'rgba(235,20,30,.75)':'rgba(255,106,0,.7)');
+    /* Верхняя панель */
 
- // шум (0–40% и дальше, нарастает)
- if(t<TB+1)noise(t,Math.floor(30+280*sm(0,.4,pc)));
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: calc(20px + env(safe-area-inset-top, 0px));
+      margin-bottom: 44px;
+    }
 
- // карточки
- if(t<TB+.3){
-  const al=t<TB?1:1-(t-TB)/.3,list=[];
-  for(const c of cards){const q=quad(c,t,C,al);if(q)list.push(q);}
-  list.sort((a,b)=>b.z-a.z);
-  for(const q of list)drawCard(q,pc);
- }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
 
- // красные линии переполнения
- redRain(t,sm(.38,.48,pc)*(t<TB?1:0));
- // пыль, ударная волна, манга-линии
- if(t>=TB){
-  dust(t,C);
-  const k=cl((t-TB)/1.1);
-  if(k<1){g.strokeStyle='#fff';g.lineWidth=18*(1-k)+2;g.beginPath();g.arc(CX,CY,k*900,0,6.283);g.stroke();
-   g.strokeStyle='#ff6a00';g.lineWidth=10*(1-k)+1;g.beginPath();g.arc(CX,CY,k*650,0,6.283);g.stroke();}
-  speedLines(t,.9*(1-sm(14,15.4,t)));
- }
- finalCard(t);
- if(t>17)speedLines(t,.8*Math.sin(cl((t-17)/1.5)*Math.PI));
- g.restore();
+    .brand-mark {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(255, 196, 0, .5);
+      border-radius: 50%;
+    }
 
- // вспышка взрыва
- if(t>=TB&&t<TB+.45){g.fillStyle=`rgba(255,255,255,${1-(t-TB)/.45})`;g.fillRect(0,0,W,H);}
- g.globalAlpha=1;
-};
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      background: var(--gold);
+    }
 
-// ---- интерфейс ----
-const ui=document.getElementById('ui');
-if(/HeadlessChrome/.test(navigator.userAgent))ui.style.display='none';
-const pb=document.getElementById('pb'),sl=document.getElementById('sl'),tl=document.getElementById('tl');
-let playing=false,t0=0,last=0;
-function show(t){sl.value=t;tl.textContent=t.toFixed(2)+'s';window.__drawCityFrame(t);}
-function loop(now){
- if(!playing)return;
- let t=(now-t0)/1000;if(t>=DUR){t0=now;t=0;}
- show(t);requestAnimationFrame(loop);
-}
-pb.onclick=()=>{playing=!playing;pb.textContent=playing?'Pause':'Play';
- if(playing){t0=performance.now()-parseFloat(sl.value)*1000;requestAnimationFrame(loop);}};
-sl.oninput=()=>show(parseFloat(sl.value));
-show(0);
-</script></body></html>
+    .brand-mark::before {
+      width: 12px;
+      height: 1px;
+    }
+
+    .brand-mark::after {
+      width: 1px;
+      height: 12px;
+    }
+
+    .edition {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    /* Первый экран */
+
+    .hero {
+      position: relative;
+      padding-bottom: 38px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 20px;
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .17em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--gold);
+      border-radius: 50%;
+      box-shadow: 0 0 12px rgba(255, 196, 0, .6);
+    }
+
+    .greeting {
+      margin: 0 0 15px;
+      color: #b7b3bf;
+      font-size: 15px;
+      font-weight: 400;
+    }
+
+    h1 {
+      max-width: 540px;
+      margin: 0;
+      font-size: clamp(39px, 10vw, 58px);
+      font-weight: 720;
+      letter-spacing: -.065em;
+      line-height: .99;
+    }
+
+    h1 .accent {
+      display: block;
+      margin-top: 7px;
+      color: var(--gold);
+    }
+
+    .hero-description {
+      max-width: 410px;
+      margin: 23px 0 0;
+      color: #aaa7b1;
+      font-size: 15px;
+      line-height: 1.75;
+    }
+
+    .hero-description strong {
+      color: var(--text);
+      font-weight: 550;
+    }
+
+    /* Графический элемент */
+
+    .attention-visual {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 150px;
+      margin: 5px 0 34px;
+      overflow: hidden;
+      border-top: 1px solid rgba(255, 255, 255, .055);
+      border-bottom: 1px solid rgba(255, 255, 255, .055);
+    }
+
+    .attention-visual::before {
+      content: "";
+      position: absolute;
+      width: 190px;
+      height: 190px;
+      border-radius: 50%;
+      background: rgba(176, 77, 255, .07);
+      filter: blur(45px);
+    }
+
+    .orbit {
+      position: absolute;
+      width: 112px;
+      height: 112px;
+      border: 1px solid rgba(255, 196, 0, .24);
+      border-radius: 50%;
+      transform: rotate(-25deg) scaleY(.72);
+    }
+
+    .orbit.orbit-2 {
+      width: 160px;
+      height: 160px;
+      border-color: rgba(176, 77, 255, .24);
+      transform: rotate(35deg) scaleY(.68);
+    }
+
+    .orbit.orbit-3 {
+      width: 210px;
+      height: 210px;
+      border-color: rgba(255, 255, 255, .09);
+      transform: rotate(-45deg) scaleY(.62);
+    }
+
+    .focus-point {
+      position: relative;
+      z-index: 1;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow:
+        0 0 12px rgba(255, 196, 0, .85),
+        0 0 35px rgba(255, 196, 0, .4);
+    }
+
+    .visual-label {
+      position: absolute;
+      right: 2px;
+      bottom: 12px;
+      color: #77737f;
+      font-size: 9px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    /* Заголовок раздела */
+
+    .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 19px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: 23px;
+      font-weight: 650;
+      letter-spacing: -.045em;
+    }
+
+    .step-counter {
+      padding-bottom: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .step-counter span {
+      color: var(--gold);
+    }
+
+    /* Карточки */
+
+    .steps {
+      display: grid;
+      gap: 11px;
+    }
+
+    .step-card {
+      position: relative;
+      padding: 20px 19px 19px;
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      background:
+        linear-gradient(
+          135deg,
+          rgba(255, 255, 255, .035),
+          rgba(255, 255, 255, .008) 65%
+        ),
+        var(--surface);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(18px);
+      animation: fade-in-up .65s cubic-bezier(.2, .7, .2, 1) forwards;
+      transition:
+        border-color .25s ease,
+        background .25s ease,
+        transform .25s ease;
+    }
+
+    .step-card:nth-child(1) { animation-delay: .08s; }
+    .step-card:nth-child(2) { animation-delay: .17s; }
+    .step-card:nth-child(3) { animation-delay: .26s; }
+    .step-card:nth-child(4) { animation-delay: .35s; }
+    .step-card:nth-child(5) { animation-delay: .44s; }
+
+    @keyframes fade-in-up {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .step-card:active {
+      background: var(--surface-hover);
+    }
+
+    .step-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .step-number {
+      color: var(--gold);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .12em;
+    }
+
+    .step-symbol {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(176, 77, 255, .24);
+      border-radius: 10px;
+      color: #d4a0ff;
+      background: rgba(176, 77, 255, .065);
+    }
+
+    .step-symbol svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .step-card h3 {
+      margin: 0 0 9px;
+      font-size: 19px;
+      font-weight: 650;
+      letter-spacing: -.035em;
+    }
+
+    .step-card p {
+      margin: 0;
+      color: #a7a3ae;
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    .step-card p strong {
+      color: #e5e0ea;
+      font-weight: 550;
+    }
+
+    .step-prompt {
+      margin-top: 15px;
+      padding: 12px 13px;
+      border-left: 2px solid var(--purple);
+      border-radius: 0 7px 7px 0;
+      background: rgba(176, 77, 255, .055);
+      color: #d4b8e8;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .step-prompt span {
+      display: block;
+      margin-bottom: 4px;
+      color: #a56ad1;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    /* Практика */
+
+    .practice {
+      position: relative;
+      margin-top: 28px;
+      padding: 23px 20px;
+      border: 1px solid rgba(255, 196, 0, .2);
+      border-radius: 15px;
+      background:
+        radial-gradient(
+          ellipse at 100% 0%,
+          rgba(255, 196, 0, .075),
+          transparent 55%
+        ),
+        #101012;
+    }
+
+    .practice-label {
+      margin-bottom: 12px;
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .practice h2 {
+      margin: 0 0 12px;
+      font-size: 23px;
+      font-weight: 650;
+      letter-spacing: -.045em;
+      line-height: 1.2;
+    }
+
+    .practice p {
+      margin: 0;
+      color: #aaa6b1;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .practice p strong {
+      color: var(--text);
+      font-weight: 550;
+    }
+
+    /* Финальный призыв */
+
+    .closing {
+      margin-top: 37px;
+      text-align: center;
+    }
+
+    .closing-mark {
+      display: block;
+      width: 30px;
+      height: 1px;
+      margin: 0 auto 19px;
+      background: var(--purple);
+      box-shadow: 0 0 14px rgba(176, 77, 255, .6);
+    }
+
+    .closing h2 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 680;
+      letter-spacing: -.05em;
+      line-height: 1.2;
+    }
+
+    .closing p {
+      max-width: 340px;
+      margin: 13px auto 22px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    .cta-button {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      width: 100%;
+      min-height: 58px;
+      padding: 16px 18px;
+      border: 0;
+      border-radius: 11px;
+      background: var(--gold);
+      color: #14110a;
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: -.015em;
+      cursor: pointer;
+      box-shadow: 0 5px 28px rgba(255, 196, 0, .09);
+      transition:
+        transform .2s ease,
+        box-shadow .2s ease,
+        opacity .2s ease;
+    }
+
+    .cta-button:active {
+      transform: scale(.985);
+      box-shadow: 0 2px 15px rgba(255, 196, 0, .13);
+    }
+
+    .cta-button svg {
+      flex-shrink: 0;
+      width: 19px;
+      height: 19px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .privacy-note {
+      margin-top: 13px;
+      color: #6f6b76;
+      font-size: 10px;
+      line-height: 1.7;
+    }
+
+    .footer {
+      margin-top: 32px;
+      color: #57545e;
+      font-size: 9px;
+      letter-spacing: .13em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    @media (min-width: 520px) {
+      .app {
+        padding-right: 30px;
+        padding-left: 30px;
+      }
+
+      .topbar {
+        margin-bottom: 55px;
+      }
+
+      .hero {
+        padding-bottom: 42px;
+      }
+
+      .step-card {
+        padding: 23px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+      }
+
+      .step-card {
+        opacity: 1;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Системы управления вниманием</span>
+      </div>
+      <span class="edition">Guide / 001</span>
+    </header>
+
+    <section class="hero">
+      <div class="eyebrow">
+        <span class="eyebrow-dot"></span>
+        Практика ясности
+      </div>
+
+      <p class="greeting" id="greeting">Привет, друг.</p>
+
+      <h1>
+        Архитектура
+        <span class="accent">внимания.</span>
+      </h1>
+
+      <p class="hero-description">
+        Ты не обязан верить каждой мысли, которая появляется в голове.
+        <strong>Но ты можешь научиться замечать её, прежде чем она
+        начнёт управлять тобой.</strong>
+      </p>
+    </section>
+
+    <div class="attention-visual" aria-hidden="true">
+      <span class="orbit orbit-3"></span>
+      <span class="orbit orbit-2"></span>
+      <span class="orbit"></span>
+      <span class="focus-point"></span>
+      <span class="visual-label">Find your focus / 01</span>
+    </div>
+
+    <section aria-labelledby="steps-heading">
+      <div class="section-heading">
+        <h2 id="steps-heading">Пять шагов к ясности</h2>
+        <span class="step-counter"><span>05</span> / практик</span>
+      </div>
+
+      <div class="steps">
+
+        <!-- Шаг 1 -->
+        <article class="step-card">
+          <div class="step-top">
+            <span class="step-number">ШАГ 01 / ОСОЗНАНИЕ</span>
+            <span class="step-symbol" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="8"></circle>
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M12 1v3M23 12h-3M12 23v-3M1 12h3"></path>
+              </svg>
+            </span>
+          </div>
+          <h3>Заметь мысль</h3>
+          <p>
+            Остановись на несколько секунд. Не пытайся немедленно
+            исправить то, что происходит в голове. Просто посмотри,
+            о чём ты думаешь. <strong>Наблюдать — не значит соглашаться.</strong>
+          </p>
+          <div class="step-prompt">
+            <span>Вопрос к себе</span>
+            Что сейчас занимает моё внимание — и почему именно это?
+          </div>
+        </article>
+
+        <!-- Шаг 2 -->
+        <article class="step-card">
+          <div class="step-top">
+            <span class="step-number">ШАГ 02 / ФИЛЬТРАЦИЯ</span>
+            <span class="step-symbol" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 5h16l-6.5 7.5V19l-3 1v-7.5L4 5z"></path>
+                <path d="M8 8h8"></path>
+              </svg>
+            </span>
+          </div>
+          <h3>Найди «червячков»</h3>
+          <p>
+            «Я опять всё испортил». «Они обо мне плохо думают».
+            «Ничего не получится». Замечай мысли, которые запускают
+            бесконечное пережёвывание одного и того же.
+            <strong>Мысль — ещё не факт.</strong>
+          </p>
+          <div class="step-prompt">
+            <span>Вопрос к себе</span>
+            У меня есть факты — или я достраиваю реальность догадками?
+          </div>
+        </article>
+
+        <!-- Шаг 3 -->
+        <article class="step-card">
+          <div class="step-top">
+            <span class="step-number">ШАГ 03 / СРЕДА</span>
+            <span class="step-symbol" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="4" width="18" height="13" rx="2"></rect>
+                <path d="M8 21h8M12 17v4"></path>
+                <path d="m8 10 2.5 2.5L16 7"></path>
+              </svg>
+            </span>
+          </div>
+          <h3>Настрой пространство</h3>
+          <p>
+            Внимание зависит не только от силы воли. Уведомления,
+            открытые вкладки и постоянные переключения создают лишний
+            шум. Убери хотя бы один источник отвлечения и оставь перед
+            собой то, что действительно важно.
+          </p>
+          <div class="step-prompt">
+            <span>Действие</span>
+            Отключи уведомления на 20 минут. Одно дело — один экран.
+          </div>
+        </article>
+
+        <!-- Шаг 4 -->
+        <article class="step-card">
+          <div class="step-top">
+            <span class="step-number">ШАГ 04 / РИТМ</span>
+            <span class="step-symbol" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="13" r="8"></circle>
+                <path d="M12 9v4l3 2M9 2h6M12 2v3M19 5l2 2"></path>
+              </svg>
+            </span>
+          </div>
+          <h3>Управляй таймером</h3>
+          <p>
+            Не требуй от себя бесконечной концентрации. Выбери одну
+            задачу и отведи ей небольшой отрезок времени. Когда мысли
+            уводят в сторону, возвращайся к делу без самокритики.
+            <strong>Твоя задача — возвращать внимание, а не удерживать
+            его любой ценой.</strong>
+          </p>
+          <div class="step-prompt">
+            <span>Действие</span>
+            Поставь таймер на 20 минут. После — сделай короткий перерыв.
+          </div>
+        </article>
+
+        <!-- Шаг 5 -->
+        <article class="step-card">
+          <div class="step-top">
+            <span class="step-number">ШАГ 05 / ТИШИНА</span>
+            <span class="step-symbol" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 3a9 9 0 1 0 9 9"></path>
+                <path d="M12 7v5l3 2"></path>
+                <path d="M16 3h5v5"></path>
+                <path d="m21 3-7 7"></path>
+              </svg>
+            </span>
+          </div>
+          <h3>Оставь место тишине</h3>
+          <p>
+            Не каждую паузу нужно заполнять музыкой, лентой или новым
+            стимулом. Иногда полезно просто посидеть и понаблюдать за
+            дыханием и мыслями, не пытаясь немедленно что-либо изменить.
+          </p>
+          <div class="step-prompt">
+            <span>Практика</span>
+            Две минуты без экрана. Замечай мысли — и позволяй им проходить.
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <section class="practice" aria-labelledby="practice-heading">
+      <div class="practice-label">Точка входа / прямо сейчас</div>
+      <h2 id="practice-heading">Подумай минуту о ручке.</h2>
+      <p>
+        Возьми любой предмет рядом с собой. Например, ручку.
+        Рассматривай её и замечай, как внимание пытается переключиться
+        на другие вещи. Не ругай себя за это.
+        <strong>Просто возвращайся к предмету.</strong>
+        А затем спроси себя: «Зачем я думаю об этом прямо сейчас?»
+      </p>
+    </section>
+
+    <!-- ОБНОВЛЕННЫЙ БЛОК ЗАВЕРШЕНИЯ -->
+    <section class="closing" aria-labelledby="closing-heading">
+      <span class="closing-mark"></span>
+      <h2 id="closing-heading">Это только начало.</h2>
+      <p>
+        Напиши мне лично, чтобы забрать полную систему практик и задать вопросы. Я отвечаю каждому.
+      </p>
+
+      <button class="cta-button" id="claim-button" type="button">
+        <span>Забрать гайд в Telegram</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h14M13 5l7 7-7 7"></path>
+        </svg>
+      </button>
+
+      <div class="privacy-note">
+        Без спама и лишнего шума. Только инструменты для работы с вниманием.
+      </div>
+    </section>
+
+    <footer class="footer">
+      Системы управления вниманием · 2026
+    </footer>
+
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const tg = window.Telegram?.WebApp;
+
+      // Инициализация Telegram Mini App.
+      if (tg) {
+        tg.ready();
+        tg.expand();
+
+        try {
+          tg.setHeaderColor("#0a0a0c");
+          tg.setBackgroundColor("#0a0a0c");
+        } catch (error) {
+          console.debug("Настройка темы недоступна:", error);
+        }
+      }
+
+      // Имя пользователя из Telegram.
+      const firstName = tg?.initDataUnsafe?.user?.first_name;
+      const greeting = document.getElementById("greeting");
+
+      greeting.textContent = `Привет, ${firstName || "друг"}!`;
+
+      const button = document.getElementById("claim-button");
+
+      // ОБНОВЛЕННАЯ ЛОГИКА КНОПКИ
+      // Ссылка на твой личный аккаунт с готовым текстом
+      const tgUser = 'GhostScale_Alex';
+      const textMessage = encodeURIComponent('Привет! Хочу получить полный гайд «Архитектура внимания» 🧠');
+      const telegramUrl = `https://t.me/${tgUser}?text=${textMessage}`;
+
+      button.addEventListener("click", (e) => {
+        e.preventDefault(); // Чтобы страница не перезагружалась
+
+        if (tg && typeof tg.openTelegramLink === "function") {
+          // Если мы внутри Telegram, открываем ссылку нативно
+          tg.openTelegramLink(telegramUrl);
+        } else {
+          // Если открыли в обычном браузере, открываем в новой вкладке
+          window.open(telegramUrl, '_blank');
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
